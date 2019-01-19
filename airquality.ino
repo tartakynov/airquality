@@ -2,15 +2,17 @@
 
 LiquidCrystal_I2C lcd(0x27, 20, 4); // set the LCD address to 0x27 for a 16 chars and 2 line display
 
-int sensor = 0;
+int pm25 = 0, pm10 = 0, aqi = 0;
+char line[16], serial[64];
 
 void setup()
 {
   lcd.init();
   lcd.backlight();
+  Serial.begin(9600);
 }
 
-int aqi25(int pm25) {
+int getAQI25(int pm25) {
   if (pm25 <= 12) {
     return pm25 * 50 / 12;
   } else if (pm25 <= 35) {
@@ -26,7 +28,7 @@ int aqi25(int pm25) {
   return 400 + (pm25 - 350) * 2 / 3;
 }
 
-int aqi10(int pm10) {
+int getAQI10(int pm10) {
   if (pm10 <= 55) {
       return pm10 * 50 / 55;
   } else if (pm10 <= 355) {
@@ -40,21 +42,32 @@ int aqi10(int pm10) {
   return pm10 - 105;
 }
 
-int aqi(int pm25, int pm10) {
-  return max(aqi25(pm25), aqi10(pm10));
+int getAQI(int pm25, int pm10) {
+  return max(getAQI25(pm25), getAQI10(pm10));
 }
 
 void loop()
 {
-  char line1[16], line2[16];
-  int pm25 = sensor;
-  int pm10 = max(0, sensor - 10);
-  sprintf(line1, "AQI: %d", aqi(pm25, pm10));
-  sprintf(line2, "PM 2.5: %d", sensor);
+  pm25++; // fake sensor input
+  pm10 = max(0, pm25 - 10); // fake sensor input
+  aqi = getAQI(pm25, pm10);
+
+  // print air quality index on the first line
+  sprintf(line, "AQI: %d", aqi);
   lcd.setCursor(3,0);
-  lcd.print(line1);
+  lcd.print(line);
+
+  // print on pm 2.5 readings on the second line
+  sprintf(line, "PM 2.5: %d", pm25);
   lcd.setCursor(0,1);
-  lcd.print(line2);
+  lcd.print(line);
+
+  // send sensor readings via serial port on request
+  if (Serial.available() > 0) {
+    sprintf(serial, "%d %d %d\n", pm25, pm10, aqi);
+    Serial.read();
+    Serial.print(serial);
+  }
+
   delay(1000);
-  sensor++;
 }
