@@ -63,41 +63,45 @@ const char* mood[] = {
 
 struct pms5003data data;
 
+/**
+ * Reads all the available frames from the stream until the stream is dry.
+ * Returns true if at least one frame is successfully read.
+ * http://www.aqmd.gov/docs/default-source/aq-spec/resources-page/plantower-pms5003-manual_v2-3.pdf
+ */
 boolean readPMSdata(Stream *s) {
   static uint8_t buffer[30];
   static uint16_t buffer_u16[15];
   static uint16_t sum;
+  static struct pms5003data tmp;
 
+  boolean success = false;
   while (s->available() >= 32) {
-    if (s->read() == 0x42) {
-      if (s->peek() == 0x4D) {
-        s->read();
-      } else {
-        continue;
-      }
-
+    // read the stream one by one until the start characters 0x42 0x4D
+    if (s->read() == 0x42 && s->peek() == 0x4D) {
+      s->read();
       s->readBytes(buffer, 30);
 
-      // get checksum ready
+      // compute the checksum
       sum = 0x8F;
-      for (uint8_t i=0; i < 28; i++) {
+      for (uint8_t i = 0; i < 28; i++) {
         sum += buffer[i];
       }
 
-      // The data comes in endian'd, this solves it
-      for (uint8_t i=0; i < 15; i++) {
+      // convert the endian
+      for (uint8_t i = 0; i < 15; i++) {
         buffer_u16[i] = buffer[i*2 + 1];
         buffer_u16[i] += (buffer[i*2] << 8);
       }
 
-      memcpy((void *)&data, (void *)buffer_u16, 30);
-      // Serial.print(data.checksum);
-      // Serial.print(" ");
-      // Serial.println(sum);
+      memcpy((void *)&tmp, (void *)buffer_u16, 30);
+      if (sum == tmp.checksum) {
+        success = true;
+        data = tmp;
+      }
     }
   }
 
-  return sum == data.checksum;
+  return success;
 }
 
 int computeAQI(int c, int cl[], int ch[], int il[], int ih[], int &level) {
@@ -136,6 +140,14 @@ void loop()
     snprintf(line, LIN_SIZE + 1, "pm2.5 %-8d", data.pm25_env);
     lcd.setCursor(0, 1);
     lcd.print(line);
+
+    // print successful read indicator for debug (+ sign)
+    lcd.setCursor(15, 0);
+    lcd.print("+");
+  } else {
+    // print unsuccessful read indicator for debug (- sign)
+    lcd.setCursor(15, 0);
+    lcd.print("-");
   }
 
   delay(2000);
