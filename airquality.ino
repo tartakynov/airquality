@@ -1,17 +1,9 @@
 #include <LiquidCrystal_I2C.h>
+#include "sensor.h"
 
 #define LIN_SIZE 16
 #define SER_SIZE 64
 #define LEVELS 7
-
-struct pms5003data {
-  uint16_t framelen;
-  uint16_t pm10_standard, pm25_standard, pm100_standard;
-  uint16_t pm10_env, pm25_env, pm100_env;
-  uint16_t particles_03um, particles_05um, particles_10um, particles_25um, particles_50um, particles_100um;
-  uint16_t unused;
-  uint16_t checksum;
-};
 
 /*
 US Standard
@@ -61,48 +53,8 @@ const char* mood[] = {
   "HAZARDOUS"
 };
 
-struct pms5003data data;
-
-/**
- * Reads all the available frames from the stream until the stream is dry.
- * Returns true if at least one frame is successfully read.
- * http://www.aqmd.gov/docs/default-source/aq-spec/resources-page/plantower-pms5003-manual_v2-3.pdf
- */
-boolean readPMSdata(Stream *s) {
-  static uint8_t buffer[30];
-  static uint16_t buffer_u16[15];
-  static uint16_t sum;
-  static struct pms5003data tmp;
-
-  boolean success = false;
-  while (s->available() >= 32) {
-    // read the stream one by one until the start characters 0x42 0x4D
-    if (s->read() == 0x42 && s->peek() == 0x4D) {
-      s->read();
-      s->readBytes(buffer, 30);
-
-      // compute the checksum
-      sum = 0x8F;
-      for (uint8_t i = 0; i < 28; i++) {
-        sum += buffer[i];
-      }
-
-      // convert the endian
-      for (uint8_t i = 0; i < 15; i++) {
-        buffer_u16[i] = buffer[i*2 + 1];
-        buffer_u16[i] += (buffer[i*2] << 8);
-      }
-
-      memcpy((void *)&tmp, (void *)buffer_u16, 30);
-      if (sum == tmp.checksum) {
-        success = true;
-        data = tmp;
-      }
-    }
-  }
-
-  return success;
-}
+const Sensor sensor(Serial);
+Sensor::DATA data;
 
 int computeAQI(int c, int cl[], int ch[], int il[], int ih[], int &level) {
   for (level = 0; level < LEVELS; level++) {
@@ -123,32 +75,25 @@ void setup()
 
 void loop()
 {
-  int l1, l2;
-  if (readPMSdata(&Serial)) {
-    int aqi = max(
-      computeAQI(data.pm25_env, Cl_pm25, Ch_pm25, Il_pm25, Ih_pm25, l1),
-      computeAQI(data.pm100_env, Cl_pm100, Ch_pm100, Il_pm100, Ih_pm100, l2)
-    );
-    int level = max(l1, l2);
-
-    // print air quality index on the first line
-    snprintf(line, LIN_SIZE + 1, "%d %-16s", aqi, mood[level]);
-    lcd.setCursor(0, 0);
-    lcd.print(line);
-
-    // print pm 2.5 readings on the second line
-    snprintf(line, LIN_SIZE + 1, "pm2.5 %-8d", data.pm25_env);
-    lcd.setCursor(0, 1);
-    lcd.print(line);
-
-    // print successful read indicator for debug (+ sign)
-    lcd.setCursor(15, 0);
-    lcd.print("+");
-  } else {
-    // print unsuccessful read indicator for debug (- sign)
-    lcd.setCursor(15, 0);
-    lcd.print("-");
+  // PMS5003 pushes data once in a second
+  if (!sensor.read(data)) {
+    return;
   }
 
-  delay(2000);
+  int l1, l2;
+  int aqi = max(
+    computeAQI(data.pm25_env, Cl_pm25, Ch_pm25, Il_pm25, Ih_pm25, l1),
+    computeAQI(data.pm100_env, Cl_pm100, Ch_pm100, Il_pm100, Ih_pm100, l2)
+  );
+  int level = max(l1, l2);
+
+  // print air quality index on the first line
+  snprintf(line, LIN_SIZE + 1, "%d %-16s", aqi, mood[level]);
+  lcd.setCursor(0, 0);
+  lcd.print(line);
+
+  // print pm 2.5 readings on the second line
+  snprintf(line, LIN_SIZE + 1, "pm2.5 %-8d", data.pm25_env);
+  lcd.setCursor(0, 1);
+  lcd.print(line);
 }
